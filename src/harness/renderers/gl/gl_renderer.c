@@ -763,12 +763,18 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
     if (flush_type == eFlush_all) {
 
         // pull depthbuffer into cpu memory to emulate BRender behavior
+#ifdef __ANDROID__
+        // GLES does not allow glReadPixels with GL_DEPTH_COMPONENT.
+        // Skipping disables depth-dependent CPU effects (shadows, etc.) but keeps the renderer alive.
+        memset(depth_buffer_flip_pixels, 0xff, render_width * render_height * sizeof(uint16_t));
+#else
         if (opengl_profile == eOpenGL_profile_es) {
             glReadPixels(0, 0, render_width, render_height, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, depth_buffer_flip_pixels);
         } else {
             glBindTexture(GL_TEXTURE_2D, depth_texture);
             glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, depth_buffer_flip_pixels);
         }
+#endif
 
         dest_y = last_colour_buffer->height;
         int src_y = render_height - last_colour_buffer->base_y - last_colour_buffer->height;

@@ -165,11 +165,22 @@ target_sources(dethrace_obj PRIVATE
 )
 
 # Create our main game binary.
-add_executable(dethrace)
+if(ANDROID)
+    add_library(dethrace SHARED)
+    set_target_properties(dethrace PROPERTIES OUTPUT_NAME "main")
+else()
+    add_executable(dethrace)
+endif()
 target_link_libraries(dethrace PRIVATE glad dethrace_obj compile_with_werror)
 target_sources(dethrace PRIVATE main.c)
 
-if(NOT MSVC)
+if(ANDROID)
+    target_sources(dethrace PRIVATE android_jni.c)
+endif()
+
+if(ANDROID)
+    target_link_libraries(dethrace PRIVATE SDL2::SDL2 GLESv3 EGL log android)
+elseif(NOT MSVC)
     if(APPLE)
         target_link_libraries(dethrace PRIVATE "-framework OpenGL")
     else()

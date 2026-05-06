@@ -14,5 +14,9 @@ target_sources(miniaudio PRIVATE
 )
 
 if (NOT MSVC)
-    target_link_libraries(miniaudio PUBLIC m dl pthread)
+    if(ANDROID)
+        target_link_libraries(miniaudio PUBLIC m dl)
+    else()
+        target_link_libraries(miniaudio PUBLIC m dl pthread)
+    endif()
 endif()

@@ -178,6 +178,14 @@ int S3OpenCDADevice(void) {
     return 0;
 }
 
+void Audio_SetPaused(int paused) {
+    if (paused) {
+        ma_engine_stop(&miniaudio_engine);
+    } else {
+        ma_engine_start(&miniaudio_engine);
+    }
+}
+
 void S3CloseDevices(void) {
     // if (gS3_hardware_info.device_installed) {
     //     gS3_direct_sound_ptr->lpVtbl->Release(gS3_direct_sound_ptr);

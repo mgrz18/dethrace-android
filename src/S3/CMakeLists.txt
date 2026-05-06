@@ -10,7 +10,11 @@ target_include_directories(s3
 target_link_libraries(s3 PRIVATE brender SDL2::SDL2 harness miniaudio compile_with_werror)
 
 if(NOT MSVC)
-    target_link_libraries(s3 PUBLIC pthread m)
+    if(ANDROID)
+        target_link_libraries(s3 PUBLIC m)
+    else()
+        target_link_libraries(s3 PUBLIC pthread m)
+    endif()
     add_compile_flags_if_supported(s3
         -Wstrict-prototypes
     )

@@ -73,6 +73,18 @@ static void* create_window_and_renderer(char* title, int x, int y, int width, in
         LOG_PANIC("SDL_INIT_VIDEO error: %s", SDL_GetError());
     }
 
+#ifdef __ANDROID__
+    {
+        extern int dr_app_event_watch(void* userdata, SDL_Event* event);
+        SDL_AddEventWatch(dr_app_event_watch, NULL);
+    }
+#endif
+
+#ifdef __ANDROID__
+    // Android only has GLES; skip desktop core profile attempt
+    create_gles_context(title);
+    opengl_profile = eOpenGL_profile_es;
+#else
     // prefer OpenGL core profile
     create_glcore_context(title);
     opengl_profile = eOpenGL_profile_core;
@@ -86,6 +98,7 @@ static void* create_window_and_renderer(char* title, int x, int y, int width, in
         create_gles_context(title);
         opengl_profile = eOpenGL_profile_es;
     }
+#endif
 
     if (window == NULL || context == NULL) {
         LOG_PANIC("Failed to create OpenGL context: %s", SDL_GetError());
@@ -99,12 +112,31 @@ static void* create_window_and_renderer(char* title, int x, int y, int width, in
     }
 
     // Load GL extensions using glad
-    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
+#ifdef __ANDROID__
+    if (!gladLoadGLES2Loader((GLADloadproc)SDL_GL_GetProcAddress)) {
+        LOG_PANIC("Failed to initialize the OpenGL ES context with GLAD.");
+        exit(1);
+    }
+#else
+    if (opengl_profile == eOpenGL_profile_es) {
+        if (!gladLoadGLES2Loader((GLADloadproc)SDL_GL_GetProcAddress)) {
+            LOG_PANIC("Failed to initialize the OpenGL ES context with GLAD.");
+            exit(1);
+        }
+    } else if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
         LOG_PANIC("Failed to initialize the OpenGL context with GLAD.");
         exit(1);
     }
+#endif
 
+#ifdef __ANDROID__
+    /* On modern phones the display is typically 120Hz; cap the game to ~60fps to keep physics sane. */
+    if (SDL_GL_SetSwapInterval(2) != 0) {
+        SDL_GL_SetSwapInterval(1);
+    }
+#else
     SDL_GL_SetSwapInterval(1);
+#endif
 
     GLRenderer_Init(opengl_profile, render_width, render_height);
     update_viewport();
@@ -134,6 +166,97 @@ static void destroy_window(void* hWnd) {
 static int is_only_key_modifier(int modifier_flags, int flag_check) {
     return (modifier_flags & flag_check) && (modifier_flags & (KMOD_CTRL | KMOD_SHIFT | KMOD_ALT | KMOD_GUI)) == (modifier_flags & flag_check);
 }
+
+#ifdef __ANDROID__
+extern void Audio_SetPaused(int paused);
+
+int dr_app_event_watch(void* userdata, SDL_Event* event) {
+    (void)userdata;
+    switch (event->type) {
+    case SDL_APP_WILLENTERBACKGROUND:
+    case SDL_APP_DIDENTERBACKGROUND:
+        Audio_SetPaused(1);
+        break;
+    case SDL_APP_WILLENTERFOREGROUND:
+    case SDL_APP_DIDENTERFOREGROUND:
+        Audio_SetPaused(0);
+        break;
+    }
+    return 1;
+}
+
+#define DR_MAX_FINGERS 8
+typedef struct {
+    SDL_FingerID id;
+    int dinput_key;
+    int active;
+} dr_touch_finger_t;
+static dr_touch_finger_t dr_fingers[DR_MAX_FINGERS];
+
+static int dr_touch_zone_scancode(float nx, float ny) {
+    /* Coordinates normalized 0..1, landscape. Top-left is (0,0). */
+    /* Top-right corner: pause / menu (ESC) */
+    if (nx > 0.88f && ny < 0.18f) return SDL_SCANCODE_ESCAPE;
+    /* Reserve the rest of the top 30% for HUD / menu mouse-clicks. */
+    if (ny < 0.30f) {
+        return 0;
+    }
+    /* Carmageddon defaults: Keypad 4/6 = steer, Keypad 8 = accel, Keypad 2 = brake/reverse */
+    if (nx < 0.20f) return SDL_SCANCODE_KP_4;       /* steer left */
+    if (nx < 0.40f) return SDL_SCANCODE_KP_6;       /* steer right */
+    if (nx > 0.75f) {
+        if (ny > 0.65f) return SDL_SCANCODE_KP_8;   /* lower-right = accelerate */
+        return SDL_SCANCODE_KP_2;                   /* upper-right = brake/reverse */
+    }
+    return 0;
+}
+
+static void dr_touch_set_dik(int dinput_key, int down) {
+    if (dinput_key) {
+        directinput_key_state[dinput_key] = down ? 0x80 : 0;
+    }
+}
+
+static void dr_touch_finger_down(SDL_FingerID id, float nx, float ny) {
+    int sc = dr_touch_zone_scancode(nx, ny);
+    if (!sc) return;
+    int dik = sdlScanCodeToDirectInputKeyNum[sc];
+    for (int i = 0; i < DR_MAX_FINGERS; i++) {
+        if (!dr_fingers[i].active) {
+            dr_fingers[i].id = id;
+            dr_fingers[i].dinput_key = dik;
+            dr_fingers[i].active = 1;
+            dr_touch_set_dik(dik, 1);
+            return;
+        }
+    }
+}
+
+static void dr_touch_finger_up(SDL_FingerID id) {
+    for (int i = 0; i < DR_MAX_FINGERS; i++) {
+        if (dr_fingers[i].active && dr_fingers[i].id == id) {
+            dr_touch_set_dik(dr_fingers[i].dinput_key, 0);
+            dr_fingers[i].active = 0;
+            return;
+        }
+    }
+}
+
+static void dr_touch_finger_motion(SDL_FingerID id, float nx, float ny) {
+    int new_sc = dr_touch_zone_scancode(nx, ny);
+    int new_dik = new_sc ? sdlScanCodeToDirectInputKeyNum[new_sc] : 0;
+    for (int i = 0; i < DR_MAX_FINGERS; i++) {
+        if (dr_fingers[i].active && dr_fingers[i].id == id) {
+            if (dr_fingers[i].dinput_key != new_dik) {
+                dr_touch_set_dik(dr_fingers[i].dinput_key, 0);
+                dr_fingers[i].dinput_key = new_dik;
+                dr_touch_set_dik(new_dik, 1);
+            }
+            return;
+        }
+    }
+}
+#endif /* __ANDROID__ */
 
 static int get_and_handle_message(MSG_* msg) {
     SDL_Event event;
@@ -178,6 +301,18 @@ static int get_and_handle_message(MSG_* msg) {
                 break;
             }
             break;
+
+#ifdef __ANDROID__
+        case SDL_FINGERDOWN:
+            dr_touch_finger_down(event.tfinger.fingerId, event.tfinger.x, event.tfinger.y);
+            break;
+        case SDL_FINGERUP:
+            dr_touch_finger_up(event.tfinger.fingerId);
+            break;
+        case SDL_FINGERMOTION:
+            dr_touch_finger_motion(event.tfinger.fingerId, event.tfinger.x, event.tfinger.y);
+            break;
+#endif
 
         case SDL_QUIT:
             msg->message = WM_QUIT;

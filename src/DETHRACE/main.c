@@ -1,6 +1,10 @@
 
 #include <stdlib.h>
 
+#ifdef __ANDROID__
+#include <SDL.h>
+#endif
+
 #ifdef _WIN32
 #include <io.h>
 #include <stdio.h>

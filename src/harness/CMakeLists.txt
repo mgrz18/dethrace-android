@@ -9,8 +9,8 @@ endif()
 target_include_directories(harness
     PRIVATE
         .
-        ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/src/DETHRACE
+        ${dethrace_SOURCE_DIR}
+        ${dethrace_SOURCE_DIR}/src/DETHRACE
         "${CMAKE_CURRENT_BINARY_DIR}"
     PUBLIC
         include
@@ -77,7 +77,7 @@ if (IO_PLATFORM STREQUAL "SDL_OpenGL")
     message(${glsl_resource_files})
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.h"
-        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DRESOURCES_GLOB=resources/*.glsl" -P "${CMAKE_SOURCE_DIR}/cmake/EmbedResources.cmake"
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DRESOURCES_GLOB=resources/*.glsl" -P "${dethrace_SOURCE_DIR}/cmake/EmbedResources.cmake"
         DEPENDS ${glsl_resource_files}
     )
     # cd /Users/j.harris/code/dethrace/build/src/harness &&
@@ -115,6 +115,11 @@ if(WIN32)
     target_sources(harness PRIVATE
         os/windows.c
     )
+elseif(ANDROID)
+    target_sources(harness PRIVATE
+        os/android.c
+    )
+    target_link_libraries(harness PRIVATE log android GLESv3 EGL)
 elseif(APPLE)
     target_sources(harness PRIVATE
         os/macos.c

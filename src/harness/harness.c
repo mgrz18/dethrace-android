@@ -157,8 +157,12 @@ void Harness_Init(int* argc, char* argv[]) {
     harness_game_config.enable_diagnostics = 0;
     // no volume multiplier
     harness_game_config.volume_multiplier = 1.0f;
-    // start window in windowed mode
+    // start window in windowed mode (always fullscreen on Android)
+#ifdef __ANDROID__
+    harness_game_config.start_full_screen = 1;
+#else
     harness_game_config.start_full_screen = 0;
+#endif
     // disable replay by default
     harness_game_config.enable_replay = 0;
     // Emulate DOS behavior
