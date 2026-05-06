@@ -29,42 +29,93 @@ You don't have to build anything. Each push to `android-port` produces a debug A
 
 ## 🎮 Game data — required
 
-DethRace ships **no game content**. You must own a copy of Carmageddon 1. The Max Pack from GoG is the easiest path:
+> **You must own and provide your own Carmageddon files.** The APK is empty without them — it'll launch and immediately show a "Couldn't open Key Map file" error until you finish this section.
 
-- <https://www.gog.com/game/carmageddon_max_pack>
+### Step 1 · Get a Carmageddon 1 install on your PC
 
-After installing it on a PC (or extracting the GoG installer with `innoextract` if you're on Mac/Linux), you'll have a folder layout like:
+Easiest source: **Carmageddon Max Pack** on GoG  → <https://www.gog.com/game/carmageddon_max_pack>.
+
+After installing it on Windows, the install path is typically:
+
+```
+C:\GOG Games\Carmageddon Max Pack\
+```
+
+If you're on macOS/Linux you don't need Windows — extract the offline installer with [`innoextract`](https://constexpr.org/innoextract/) (`brew install innoextract`).
+
+### Step 2 · Locate the two folders you'll copy
+
+Inside the install you'll find this structure (only the bits in **bold** matter):
 
 ```
 Carmageddon Max Pack/
 ├── CARMA/
-│   └── DATA/                ← this folder
-└── __support/
-    └── app/
-        └── CARMA/
-            └── DATA/        ← these extras are critical (KEYMAP_*.TXT etc.)
+│   └── DATA/                ← *** main game data, ~190 MB ***
+├── __support/
+│   └── app/
+│       └── CARMA/
+│           └── DATA/        ← *** GoG support files (KEYMAP_*.TXT, OPTIONS.TXT, PATHS.TXT) ***
+└── (a bunch of other folders we don't need: DOSBOX, __redist, etc.)
 ```
 
-Push them to your phone with `adb`:
+You need **both** `DATA/` folders. The first is the game. The second ships with GoG and contains the keyboard mapping the engine refuses to start without.
+
+### Step 3 · Copy them onto the phone
+
+The game expects everything at:
+
+```
+/sdcard/Android/data/com.dethrace.android/files/DATA/
+```
+
+(That's the app's external files dir — Android lets the app read from there without runtime permissions.)
+
+#### Option A · From your computer with `adb` (fastest, ~5 seconds for 190 MB over USB-C)
+
+Plug your phone in (USB debugging enabled) and run, from your PC's terminal:
 
 ```sh
-# 1. The main DATA folder (~190 MB)
+# 1. The main DATA folder
 adb push "Carmageddon Max Pack/CARMA/DATA" \
     /sdcard/Android/data/com.dethrace.android/files/
 
-# 2. The GoG support files (KEYMAP_*.TXT, OPTIONS.TXT, PATHS.TXT — tiny)
+# 2. The GoG support files merged INTO the DATA you just pushed
 adb push "Carmageddon Max Pack/__support/app/CARMA/DATA/." \
     /sdcard/Android/data/com.dethrace.android/files/DATA/
 ```
 
-Verify it landed where the game expects:
+> The trailing `/.` on the second `adb push` matters — it copies the *contents* of `__support/.../DATA/` and merges them into the existing `DATA/` on the phone, instead of nesting another `DATA` folder.
+
+#### Option B · From a file manager on the phone (no PC needed)
+
+1. Compress `CARMA/DATA/` and `__support/app/CARMA/DATA/` into a single zip on your PC, with the layout:
+
+   ```
+   carmageddon-data.zip
+   └── DATA/
+       ├── CARS/
+       ├── RACES/
+       ├── ... (everything from CARMA/DATA)
+       └── KEYMAP_0.TXT, KEYMAP_1.TXT, ... (merged in from __support)
+   ```
+2. Send the zip to your phone (email, Google Drive, anything).
+3. Install a file manager that can write to app-private storage (e.g. **Solid Explorer**, **MiXplorer**, **Material Files**). The stock Samsung "Files" app on Android 11+ won't work — Google blocks `Android/data/` from the system file picker.
+4. Extract the zip into `Android/data/com.dethrace.android/files/`. The result must end up as `Android/data/com.dethrace.android/files/DATA/...`.
+
+#### Step 4 · Verify it's in the right place
 
 ```sh
 adb shell ls /sdcard/Android/data/com.dethrace.android/files/DATA/ | head
-# CARS, RACES, SOUND, KEYMAP_0.TXT, ... = success
+# Expected output includes folders like CARS, RACES, SOUND, ACTORS
+# and files like KEYMAP_0.TXT, OPTIONS.TXT
 ```
 
-> **Splat Pack & demos:** also work, just push the corresponding `DATA/` from `CARSPLAT/` (Splat Pack) or `splatdem/`. The game auto-detects the installed mode.
+If you see those, you're done — open the app.
+
+### Splat Pack and demos
+
+- **Splat Pack** (also part of the GoG Max Pack, in `CARSPLAT/`): push `CARSPLAT/DATA/` to the same place the same way. The engine auto-detects which game mode is available.
+- **Free demos** (`carmdemo`, `splatdem`, `Splatpack_christmas_demo`) work too — push their `DATA/` folder.
 
 ---
 
