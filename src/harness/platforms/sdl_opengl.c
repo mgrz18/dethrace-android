@@ -194,20 +194,28 @@ typedef struct {
 static dr_touch_finger_t dr_fingers[DR_MAX_FINGERS];
 
 static int dr_touch_zone_scancode(float nx, float ny) {
-    /* Coordinates normalized 0..1, landscape. Top-left is (0,0). */
-    /* Top-right corner: pause / menu (ESC) */
+    /* Coordinates normalized 0..1 across the device window, landscape.
+     * Zones are intentionally wider than the on-screen icons so a thumb
+     * resting on the corner still registers, but they do NOT overlap. */
+
+    /* Top-right pause icon */
     if (nx > 0.88f && ny < 0.18f) return SDL_SCANCODE_ESCAPE;
-    /* Reserve the rest of the top 30% for HUD / menu mouse-clicks. */
-    if (ny < 0.30f) {
+
+    /* Everything else only fires in the lower half of the screen so menu
+     * mouse-clicks above are unaffected. */
+    if (ny < 0.40f) {
         return 0;
     }
-    /* Carmageddon defaults: Keypad 4/6 = steer, Keypad 8 = accel, Keypad 2 = brake/reverse */
-    if (nx < 0.20f) return SDL_SCANCODE_KP_4;       /* steer left */
-    if (nx < 0.40f) return SDL_SCANCODE_KP_6;       /* steer right */
-    if (nx > 0.75f) {
-        if (ny > 0.65f) return SDL_SCANCODE_KP_8;   /* lower-right = accelerate */
-        return SDL_SCANCODE_KP_2;                   /* upper-right = brake/reverse */
-    }
+
+    /* Steering pad — left half of the screen */
+    if (nx < 0.13f) return SDL_SCANCODE_KP_4;       /* ◀ left disc  */
+    if (nx < 0.27f) return SDL_SCANCODE_KP_6;       /* ▶ right disc */
+
+    /* Pedals — right half of the screen, split horizontally to match the
+     * brake-and-gas pair drawn side-by-side. */
+    if (nx > 0.87f)  return SDL_SCANCODE_KP_8;      /* gas (rightmost)        */
+    if (nx > 0.73f)  return SDL_SCANCODE_KP_2;      /* brake (left of the gas) */
+
     return 0;
 }
 
