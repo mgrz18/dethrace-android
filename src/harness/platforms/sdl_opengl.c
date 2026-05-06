@@ -395,6 +395,24 @@ static int get_and_handle_message(MSG_* msg) {
 }
 
 static void swap_window(void) {
+#ifdef __ANDROID__
+    /* Erase the columns that fall outside the centered 320-wide game area
+     * before showing the frame. Stops cursor sprites and other transient
+     * draws from leaving trails on the wider Android pixmap. */
+    extern br_pixelmap* gBack_screen;
+    if (gBack_screen && gBack_screen->pixels && gBack_screen->width > 320) {
+        int left  = gBack_screen->origin_x;
+        int right = left + 320;
+        if (left < 0) left = 0;
+        if (right > gBack_screen->width) right = gBack_screen->width;
+        uint8_t* base = (uint8_t*)gBack_screen->pixels;
+        for (int y = 0; y < gBack_screen->height; y++) {
+            uint8_t* row = base + y * gBack_screen->row_bytes;
+            if (left > 0) memset(row, 0, left);
+            if (right < gBack_screen->width) memset(row + right, 0, gBack_screen->width - right);
+        }
+    }
+#endif
     SDL_GL_SwapWindow(window);
 }
 

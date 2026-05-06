@@ -512,6 +512,34 @@ void PDAllocateScreenAndBack(void) {
     SSDXInitDirectDraw(gGraf_specs[gGraf_spec_index].total_width, gGraf_specs[gGraf_spec_index].total_height, &row_bytes);
     gScreen = BrPixelmapAllocate(BR_PMT_INDEX_8, gGraf_specs[gGraf_spec_index].total_width, gGraf_specs[gGraf_spec_index].total_height, NULL, BR_PMAF_NORMAL);
 
+#ifdef __ANDROID__
+    /* Center the 320×200 game-logical drawing in the wider Android pixmap.
+     * BRender Copy/Fill/Text/Line honour origin_x via PixelmapRectangleClipTwo,
+     * so menus/HUD shift right by (extra/2). The 3D pass writes pixels via
+     * gl_renderer directly and ignores origin_x. */
+    int dr_origin_x = (gScreen->width - 320) / 2;
+    if (dr_origin_x < 0) dr_origin_x = 0;
+    /* Pre-paint the canvas black so areas the game never touches don't hold
+     * garbage that would ghost when the cursor passes. */
+    if (gScreen->pixels) {
+        memset(gScreen->pixels, 0, gScreen->row_bytes * gScreen->height);
+    }
+    gScreen->origin_x = dr_origin_x;
+    gScreen->origin_y = 0;
+    gGfx_initialized = 1;
+    gBack_screen = BrPixelmapMatch(gScreen, BR_PMMATCH_OFFSCREEN);
+    if (gBack_screen->pixels) {
+        memset(gBack_screen->pixels, 0, gBack_screen->row_bytes * gBack_screen->height);
+    }
+    gBack_screen->origin_x = dr_origin_x;
+    gBack_screen->origin_y = 0;
+    gTemp_screen = BrPixelmapMatch(gScreen, BR_PMMATCH_OFFSCREEN);
+    if (gTemp_screen->pixels) {
+        memset(gTemp_screen->pixels, 0, gTemp_screen->row_bytes * gTemp_screen->height);
+    }
+    gTemp_screen->origin_x = dr_origin_x;
+    gTemp_screen->origin_y = 0;
+#else
     gScreen->origin_x = 0;
     gGfx_initialized = 1;
     gScreen->origin_y = 0;
@@ -521,6 +549,7 @@ void PDAllocateScreenAndBack(void) {
     gTemp_screen = BrPixelmapMatch(gScreen, BR_PMMATCH_OFFSCREEN);
     gTemp_screen->origin_x = 0;
     gTemp_screen->origin_y = 0;
+#endif
     dr_dprintf("PDAllocateScreenAndBack() - END.");
 
     // dr_dprintf("PDAllocateScreenAndBack() - START...");
