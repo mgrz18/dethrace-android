@@ -513,11 +513,14 @@ void PDAllocateScreenAndBack(void) {
     gScreen = BrPixelmapAllocate(BR_PMT_INDEX_8, gGraf_specs[gGraf_spec_index].total_width, gGraf_specs[gGraf_spec_index].total_height, NULL, BR_PMAF_NORMAL);
 
 #ifdef __ANDROID__
-    /* Center the 320×200 game-logical drawing in the wider Android pixmap.
+    /* Center the base-width game-logical drawing in the widened Android pixmap.
      * BRender Copy/Fill/Text/Line honour origin_x via PixelmapRectangleClipTwo,
-     * so menus/HUD shift right by (extra/2). The 3D pass writes pixels via
-     * gl_renderer directly and ignores origin_x. */
-    int dr_origin_x = (gScreen->width - 320) / 2;
+     * so menus/HUD shift right by the half-difference. The 3D pass writes
+     * pixels via gl_renderer directly and ignores origin_x — it fills the
+     * full canvas, giving widescreen FOV for the race scene. */
+    extern int DRAndroid_GetBaseWidth(void);
+    int dr_base_w = DRAndroid_GetBaseWidth();
+    int dr_origin_x = (dr_base_w > 0) ? (gScreen->width - dr_base_w) / 2 : 0;
     if (dr_origin_x < 0) dr_origin_x = 0;
     /* Pre-paint the canvas black so areas the game never touches don't hold
      * garbage that would ghost when the cursor passes. */

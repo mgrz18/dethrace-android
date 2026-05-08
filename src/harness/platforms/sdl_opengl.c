@@ -14,6 +14,10 @@
 #include "grafdata.h"
 #include "pd/sys.h"
 
+#ifdef __ANDROID__
+#include "android_widescreen.h"
+#endif
+
 SDL_Window* window;
 SDL_GLContext context;
 uint8_t directinput_key_state[SDL_NUM_SCANCODES];
@@ -62,69 +66,9 @@ static void create_gles_context(char* title) {
     context = SDL_GL_CreateContext(window);
 }
 
-#ifdef __ANDROID__
-/* gGraf_specs lives in src/DETHRACE/pc-win95/win95sys.c. We need to widen
- * gGraf_specs[].total_width before the game allocates gScreen / gBack_screen. */
-#include "common/grafdata.h"
-#include "pd/sys.h"
-
-/* Round up to nearest multiple of 4 — keeps texture/row alignment happy. */
-static int dr_round_up_4(int v) { return (v + 3) & ~3; }
-
-static void dr_widen_for_device_aspect(int *out_width, int *out_height) {
-    LOG_INFO("dr_widen entry: requested=%dx%d", *out_width, *out_height);
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        LOG_PANIC("SDL_INIT_VIDEO error: %s", SDL_GetError());
-    }
-    SDL_DisplayMode mode;
-    if (SDL_GetCurrentDisplayMode(0, &mode) != 0) {
-        LOG_WARN("SDL_GetCurrentDisplayMode failed: %s", SDL_GetError());
-        return;
-    }
-    LOG_INFO("dr_widen mode: %dx%d", mode.w, mode.h);
-    /* Display reports portrait dims when the system rotation hasn't kicked in
-     * yet; treat the larger side as horizontal to compute landscape aspect. */
-    int sw = mode.w > mode.h ? mode.w : mode.h;
-    int sh = mode.w > mode.h ? mode.h : mode.w;
-    if (sw <= 0 || sh <= 0) return;
-
-    int base_height = *out_height;          /* 200 from the game */
-    float aspect = (float)sw / (float)sh;
-    int new_width = dr_round_up_4((int)(base_height * aspect + 0.5f));
-
-    /* Sanity: don't go narrower than the original 320, don't go absurdly wide. */
-    if (new_width < *out_width)  new_width = *out_width;
-    if (new_width > *out_width * 2) new_width = *out_width * 2;
-
-    LOG_INFO("widescreen: device %dx%d aspect %.3f -> render %dx%d",
-             sw, sh, aspect, new_width, base_height);
-
-    /* Patch the BRender graphics spec so the game's own pixmap allocations
-     * (gScreen, gBack_screen, gTemp_screen) come out at the new width. */
-    for (int i = 0; i < 2; i++) {
-        if (gGraf_specs[i].total_width == *out_width &&
-            gGraf_specs[i].total_height == base_height) {
-            gGraf_specs[i].total_width = new_width;
-            gGraf_specs[i].row_bytes   = new_width;
-            gGraf_specs[i].phys_width  = new_width;
-        }
-    }
-
-    /* Match the corresponding HUD layout entry so CalcGrafDataIndex passes. */
-    for (int i = 0; i < 2; i++) {
-        if (gGraf_data[i].width == *out_width && gGraf_data[i].height == base_height) {
-            gGraf_data[i].width = new_width;
-            break;
-        }
-    }
-
-    *out_width = new_width;
-}
-#endif
-
 static void* create_window_and_renderer(char* title, int x, int y, int width, int height) {
 #ifdef __ANDROID__
-    dr_widen_for_device_aspect(&width, &height);
+    DRAndroid_WidenForDeviceAspect(&width, &height);
 #endif
 
     window_width = width;
@@ -396,13 +340,15 @@ static int get_and_handle_message(MSG_* msg) {
 
 static void swap_window(void) {
 #ifdef __ANDROID__
-    /* Erase the columns that fall outside the centered 320-wide game area
-     * before showing the frame. Stops cursor sprites and other transient
-     * draws from leaving trails on the wider Android pixmap. */
+    /* Erase the columns that fall outside the centered base-width game area
+     * before showing the frame. Stops cursor sprites and other transient 2D
+     * draws from leaving trails on the wider Android pixmap. The 3D pass
+     * fills the full surface so it doesn't need this. */
     extern br_pixelmap* gBack_screen;
-    if (gBack_screen && gBack_screen->pixels && gBack_screen->width > 320) {
-        int left  = gBack_screen->origin_x;
-        int right = left + 320;
+    const int base_w = DRAndroid_GetBaseWidth();
+    if (gBack_screen && gBack_screen->pixels && base_w > 0 && gBack_screen->width > base_w) {
+        int left = gBack_screen->origin_x;
+        int right = left + base_w;
         if (left < 0) left = 0;
         if (right > gBack_screen->width) right = gBack_screen->width;
         uint8_t* base = (uint8_t*)gBack_screen->pixels;

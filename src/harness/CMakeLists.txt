@@ -100,6 +100,8 @@ if (IO_PLATFORM STREQUAL "SDL_OpenGL")
         renderers/gl/gl_renderer.h
         renderers/gl/stored_context.c
         renderers/gl/stored_context.h
+        $<$<BOOL:${ANDROID}>:platforms/android_widescreen.c>
+        $<$<BOOL:${ANDROID}>:platforms/android_widescreen.h>
 
         # resources/framebuffer_vert.glsl.h
         # resources/framebuffer_frag.glsl.h
