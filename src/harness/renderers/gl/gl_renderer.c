@@ -820,27 +820,40 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
 
     CHECK_GL_ERROR("GLRenderer_FlushBuffer3");
 
-    // flip Y and nearest-neighbour downsample super → pixmap.
-    int dest_y = render_height;
-
-    uint8_t new_pixel;
-    for (int y = 0; y < render_height; y++) {
-        dest_y--;
-        int src_y = y * super_factor;
-        for (int x = 0; x < render_width; x++) {
-            int src_x = x * super_factor;
-            new_pixel = screen_buffer_flip_pixels[src_y * super_width + src_x];
-            if (new_pixel != 0) {
-                pm_pixels[dest_y * render_width + x] = new_pixel;
+    // flip Y and nearest-neighbour downsample super → pixmap. last_colour_buffer
+    // can be a sub-pixmap of gBack_screen (e.g. the wreck gallery uses
+    // BrPixelmapAllocateSub), so iterate its width/height and apply its
+    // base_x/base_y to the framebuffer source coords. Writing the full pixmap
+    // size into the sub-pixmap's pointer would overflow into adjacent rows
+    // and produce ghost copies of the 3D scene elsewhere on the back buffer.
+    {
+        int dest_y = last_colour_buffer->height;
+        int src_y_pix = render_height - last_colour_buffer->base_y - last_colour_buffer->height;
+        uint8_t new_pixel;
+        for (int y = 0; y < last_colour_buffer->height; y++) {
+            dest_y--;
+            int src_super_y = src_y_pix * super_factor;
+            for (int x = 0; x < last_colour_buffer->width; x++) {
+                int src_super_x = (last_colour_buffer->base_x + x) * super_factor;
+                new_pixel = screen_buffer_flip_pixels[src_super_y * super_width + src_super_x];
+                if (new_pixel != 0) {
+                    pm_pixels[dest_y * last_colour_buffer->row_bytes + x] = new_pixel;
+                }
             }
+            src_y_pix++;
         }
     }
 
-    // Snapshot the pixmap state right after the 3D readback. The present
-    // shader compares this to the final pixmap to tell which pixels were
-    // touched by 2D draws that ran after the 3D pass.
+    // Snapshot the back buffer state right after the 3D readback. The present
+    // shader compares this to the final back buffer to tell which pixels were
+    // touched by 2D draws that ran after the 3D pass. We always copy from
+    // gBack_screen (not from last_colour_buffer, which may be a sub-pixmap)
+    // because the present shader sees the full back buffer.
     if (snapshot_pixels != NULL) {
-        memcpy(snapshot_pixels, pm_pixels, render_width * render_height);
+        extern br_pixelmap* gBack_screen;
+        if (gBack_screen != NULL && gBack_screen->pixels != NULL) {
+            memcpy(snapshot_pixels, gBack_screen->pixels, render_width * render_height);
+        }
     }
 
     CHECK_GL_ERROR("GLRenderer_FlushBuffer2");
@@ -862,7 +875,7 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
         }
 #endif
 
-        dest_y = last_colour_buffer->height;
+        int dest_y = last_colour_buffer->height;
         int src_y = render_height - last_colour_buffer->base_y - last_colour_buffer->height;
 
         for (int y = 0; y < last_colour_buffer->height; y++) {
