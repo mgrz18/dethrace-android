@@ -146,6 +146,12 @@ static void* create_window_and_renderer(char* title, int x, int y, int width, in
     SDL_GL_SetSwapInterval(1);
 #endif
 
+#ifdef __ANDROID__
+    /* Render the 3D scene at 2× the pixmap resolution and downsample / present
+     * via the super-res-aware framebuffer shader. The 2D HUD/menu drawing
+     * stays at pixmap resolution. */
+    GLRenderer_SetSuperFactor(2);
+#endif
     GLRenderer_Init(opengl_profile, render_width, render_height);
     update_viewport();
 

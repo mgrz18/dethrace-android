@@ -17,6 +17,13 @@ static GLuint shader_program_2d;
 static GLuint shader_program_3d;
 static GLuint framebuffer_id, framebuffer_texture = 0;
 
+// Pixmap snapshot taken right after the 3D readback inside FlushBuffer; the
+// present-time shader compares the current pixmap to this snapshot to detect
+// post-3D 2D draws (HUD/menu) so the rest can be drawn from the super-res
+// 3D framebuffer instead of the downsampled pixmap.
+static GLuint snapshot_texture = 0;
+static uint8_t* snapshot_pixels = NULL;
+
 // holds the latest uploaded version of the colour_buffer. Available in shader for blending
 static GLuint current_colourbuffer_texture;
 
@@ -77,7 +84,7 @@ struct {
 } uniforms_3d;
 
 struct {
-    GLuint pixels, palette;
+    GLuint pixels, palette, snapshot, super_3d;
 } uniforms_2d;
 
 static GLuint CreateShaderProgram(char* name, const char* vertex_shader, const int vertex_shader_len, const char* fragment_shader, const int fragment_shader_len) {
@@ -158,10 +165,14 @@ static void LoadShaders(void) {
     glUseProgram(shader_program_2d);
     uniforms_2d.pixels = GetValidatedUniformLocation(shader_program_2d, "u_pixels");
     uniforms_2d.palette = GetValidatedUniformLocation(shader_program_2d, "u_palette");
+    uniforms_2d.snapshot = GetValidatedUniformLocation(shader_program_2d, "u_snapshot");
+    uniforms_2d.super_3d = GetValidatedUniformLocation(shader_program_2d, "u_super_3d");
 
     // bind the uniform samplers to texture units:
     glUniform1i(uniforms_2d.pixels, 0);
     glUniform1i(uniforms_2d.palette, 1);
+    glUniform1i(uniforms_2d.snapshot, 5);
+    glUniform1i(uniforms_2d.super_3d, 6);
 
     frag = get_embedded_resource_by_name("resources/3d_frag.glsl");
     if (frag == NULL) {
@@ -271,8 +282,8 @@ void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_hei
 
     int maxTextureImageUnits;
     glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maxTextureImageUnits);
-    if (maxTextureImageUnits < 3) {
-        LOG_PANIC("GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS is %d. Need at least 3", maxTextureImageUnits);
+    if (maxTextureImageUnits < 7) {
+        LOG_PANIC("GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS is %d. Need at least 7", maxTextureImageUnits);
     }
 
     LoadShaders();
@@ -292,6 +303,11 @@ void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_hei
     glGenTextures(1, &framebuffer_texture);
     glGenTextures(1, &depth_texture);
     glGenTextures(1, &current_colourbuffer_texture);
+    glGenTextures(1, &snapshot_texture);
+
+    glBindTexture(GL_TEXTURE_2D, snapshot_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     // setup framebuffer
     glGenFramebuffers(1, &framebuffer_id);
@@ -330,6 +346,7 @@ void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_hei
 
     screen_buffer_flip_pixels = malloc(sizeof(uint8_t) * super_width * super_height);
     depth_buffer_flip_pixels = malloc(sizeof(uint16_t) * super_width * super_height);
+    snapshot_pixels = calloc(render_width * render_height, sizeof(uint8_t));
 
     CHECK_GL_ERROR("initializeOpenGLContext");
 }
@@ -454,11 +471,24 @@ void GLRenderer_FullScreenQuad(uint8_t* screen_buffer) {
 
     glDisable(GL_DEPTH_TEST);
 
-    // glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    // CHECK_GL_ERROR("GLRenderer_RenderFullScreenQuad2");
+    // unit 0: current pixmap (R8UI)
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, fullscreen_quad_texture);
-
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, render_width, render_height, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, screen_buffer);
+
+    // unit 5: post-3D-readback snapshot (R8UI). If the snapshot hasn't been
+    // populated this frame (no 3D pass), it is all zeros from ClearBuffers.
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, snapshot_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, render_width, render_height, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, snapshot_pixels);
+
+    // unit 6: super-res 3D framebuffer (R8UI), already on the GPU from the
+    // 3D pass; no upload needed.
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, framebuffer_texture);
+
+    // restore active unit so subsequent draws aren't surprised
+    glActiveTexture(GL_TEXTURE0);
 
     glBindVertexArray(screen_buffer_vao);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, screen_buffer_ebo);
@@ -478,6 +508,14 @@ void GLRenderer_ClearBuffers(void) {
     // clear real framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Reset the post-3D-readback snapshot. If FlushBuffer doesn't run this
+    // frame (frontend menu, no 3D pass) the present shader will see snapshot=0
+    // everywhere, treat all non-zero pixmap pixels as 2D draws and skip the
+    // super-res 3D path entirely.
+    if (snapshot_pixels != NULL) {
+        memset(snapshot_pixels, 0, render_width * render_height);
+    }
 
     CHECK_GL_ERROR("GLRenderer_ClearBuffers");
 }
@@ -784,6 +822,13 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
                 pm_pixels[dest_y * render_width + x] = new_pixel;
             }
         }
+    }
+
+    // Snapshot the pixmap state right after the 3D readback. The present
+    // shader compares this to the final pixmap to tell which pixels were
+    // touched by 2D draws that ran after the 3D pass.
+    if (snapshot_pixels != NULL) {
+        memcpy(snapshot_pixels, pm_pixels, render_width * render_height);
     }
 
     CHECK_GL_ERROR("GLRenderer_FlushBuffer2");
