@@ -2091,6 +2091,15 @@ void DRPixelmapRectangleMaskedCopy(br_pixelmap* pDest, br_int_16 pDest_x, br_int
     tU8* conv_table;
     LOG_TRACE("(%p, %d, %d, %p, %d, %d, %d, %d)", pDest, pDest_x, pDest_y, pSource, pSource_x, pSource_y, pWidth, pHeight);
 
+    // Bake the pixmap origin into coords up-front so the rest of the function
+    // works in absolute buffer space — same contract as PixelmapRectangleClipTwo.
+    // No-op when origin is 0 (every desktop build); on Android the back buffer
+    // gets origin_x = (widened_width - 320) / 2 to centre the 320-px game UI.
+    pDest_x += pDest->origin_x;
+    pDest_y += pDest->origin_y;
+    pSource_x += pSource->origin_x;
+    pSource_y += pSource->origin_y;
+
     source_ptr = (tU8*)pSource->pixels + (pSource->row_bytes * pSource_y + pSource_x);
     dest_ptr = (tU8*)pDest->pixels + (pDest->row_bytes * pDest_y + pDest_x);
     source_row_wrap = pSource->row_bytes - pWidth;
@@ -2188,6 +2197,12 @@ void DRPixelmapRectangleOnscreenCopy(br_pixelmap* pDest, br_int_16 pDest_x, br_i
     tU8* conv_table;
     // LOG_TRACE("(%p, %d, %d, %p, %d, %d, %d, %d)", pDest, pDest_x, pDest_y, pSource, pSource_x, pSource_y, pWidth, pHeight);
 
+    // Bake pixmap origin into coords (see DRPixelmapRectangleMaskedCopy).
+    pDest_x += pDest->origin_x;
+    pDest_y += pDest->origin_y;
+    pSource_x += pSource->origin_x;
+    pSource_y += pSource->origin_y;
+
     source_row_wrap = pSource->row_bytes - pWidth;
     dest_row_wrap = pDest->row_bytes - pWidth;
     dest_ptr = (tU8*)pDest->pixels + (pDest->row_bytes * pDest_y + pDest_x);
@@ -2224,6 +2239,12 @@ void DRPixelmapRectangleShearedCopy(br_pixelmap* pDest, br_int_16 pDest_x, br_in
     tU8* conv_table;
     tX1616 current_shear;
     LOG_TRACE("(%p, %d, %d, %p, %d, %d, %d, %d, %d)", pDest, pDest_x, pDest_y, pSource, pSource_x, pSource_y, pWidth, pHeight, pShear);
+
+    // Bake pixmap origin into coords (see DRPixelmapRectangleMaskedCopy).
+    pDest_x += pDest->origin_x;
+    pDest_y += pDest->origin_y;
+    pSource_x += pSource->origin_x;
+    pSource_y += pSource->origin_y;
 
     current_shear = 0;
     last_shear_x = 0;
@@ -2324,6 +2345,12 @@ void DRPixelmapRectangleVScaledCopy(br_pixelmap* pDest, br_int_16 pDest_x, br_in
     if (!pHeight) {
         return;
     }
+
+    // Bake pixmap origin into coords (see DRPixelmapRectangleMaskedCopy).
+    pDest_x += pDest->origin_x;
+    pDest_y += pDest->origin_y;
+    pSource_x += pSource->origin_x;
+    pSource_y += pSource->origin_y;
 
     source_row_wrap = pSource->row_bytes - pWidth;
     dest_row_wrap = pDest->row_bytes - pWidth;
