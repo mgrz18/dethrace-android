@@ -14,6 +14,10 @@
 extern void Harness_Init(int* argc, char* argv[]);
 extern int original_main(int pArgc, char* pArgv[]);
 
+#ifdef __ANDROID__
+extern int gGraf_spec_index;
+#endif
+
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
     /* Attach to the console that started us if any */
@@ -34,6 +38,16 @@ int main(int argc, char* argv[]) {
 #endif
 
     Harness_Init(&argc, argv);
+
+#ifdef __ANDROID__
+    /* Force the 640×480 graphics spec on Android. The 3D scene then renders
+     * at the higher resolution before the device's widescreen widening kicks
+     * in (DRAndroid_WidenForDeviceAspect stretches it further to fill the
+     * panel). The original_main() arg parser also accepts -hires, but on
+     * Android the launcher does not pass any argv, so we set the spec index
+     * directly. */
+    gGraf_spec_index = 1;
+#endif
 
     return original_main(argc, argv);
 }
