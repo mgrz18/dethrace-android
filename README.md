@@ -233,6 +233,12 @@ PRs welcome.
 
 ---
 
+## 🤖 Acknowledgements
+
+The Android port — Gradle/NDK wiring, GLES 3 path, touch overlay, lifecycle handling, widescreen pixmap and the rest of the `__ANDROID__`-gated changes — was developed in collaboration with [Claude Code](https://claude.com/claude-code) (Anthropic, Claude Opus 4.7).
+
+---
+
 ## 📜 License
 
 Same as upstream DethRace. SDL2 is zlib. Carmageddon assets remain © Stainless Games — bring your own copy.
