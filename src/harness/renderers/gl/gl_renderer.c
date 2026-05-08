@@ -507,9 +507,15 @@ void GLRenderer_FullScreenQuad(uint8_t* screen_buffer) {
 }
 
 void GLRenderer_ClearBuffers(void) {
-    // clear our virtual framebuffer
+    // clear our virtual framebuffer. The colour attachment is GL_R8UI so
+    // glClear/glClearColor (which are float-typed) do not portably write a
+    // defined value on GLES; use glClearBufferuiv instead. Without this the
+    // super-res 3D framebuffer carries content from previous frames and the
+    // present shader displays the residue as ghost geometry.
+    static const GLuint zero[4] = { 0, 0, 0, 0 };
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClearBufferuiv(GL_COLOR, 0, zero);
+    glClear(GL_DEPTH_BUFFER_BIT);
 
     // clear real framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -870,8 +876,13 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
             src_y++;
         }
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
-    glClear(GL_COLOR_BUFFER_BIT);
+    {
+        // Same integer-clear story as in GLRenderer_ClearBuffers — glClear on
+        // a R8UI colour attachment is undefined on GLES.
+        static const GLuint zero[4] = { 0, 0, 0, 0 };
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
+        glClearBufferuiv(GL_COLOR, 0, zero);
+    }
     flush_counter++;
     dirty_buffers = 0;
     CHECK_GL_ERROR("GLRenderer_FlushBuffer");
