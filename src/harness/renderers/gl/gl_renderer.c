@@ -392,10 +392,16 @@ void GLRenderer_SetShadeTable(br_pixelmap* table) {
 void GLRenderer_SetBlendTable(br_pixelmap* table) {
 
     if (flush_counter != colourbuffer_upload_counter) {
-        GLRenderer_FlushBuffer(eFlush_color_buffer);
+        // Snapshot the super-res framebuffer into the colour-buffer texture
+        // BEFORE FlushBuffer clears it. The 3D shader reads this with
+        // gl_FragCoord (super-res) and u_viewport_height (super_height) to
+        // do the index_blend lookup, so it has to be at super resolution.
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, current_colourbuffer_texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, render_width, render_height, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, last_colour_buffer->pixels);
+        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, 0, 0, super_width, super_height, 0);
+        glActiveTexture(GL_TEXTURE0);
+        GLRenderer_FlushBuffer(eFlush_color_buffer);
         colourbuffer_upload_counter = flush_counter;
     }
 
