@@ -42,6 +42,11 @@ typedef enum tOpenGL_profile {
     }
 
 void GLRenderer_Init(tOpenGL_profile profile, int render_width, int render_height);
+/* Set the supersample factor for the 3D framebuffer. Must be called BEFORE
+ * GLRenderer_Init. factor=1 (default) keeps behaviour identical; factor>1
+ * makes the GL framebuffer that 3D draws into factor× wider/taller and
+ * downsamples back into the CPU pixmap on FlushBuffer. */
+void GLRenderer_SetSuperFactor(int factor);
 void GLRenderer_SetPalette(uint8_t* rgba_colors);
 void GLRenderer_BeginScene(br_actor* camera, br_pixelmap* colour_buffer, br_pixelmap* depth_buffer);
 void GLRenderer_EndScene(void);

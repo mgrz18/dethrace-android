@@ -25,6 +25,14 @@ static uint8_t* screen_buffer_flip_pixels;
 static uint16_t* depth_buffer_flip_pixels;
 
 static int render_width, render_height;
+/* Supersample factor for the 3D framebuffer. The CPU pixmap (game canvas the
+ * 2D HUD draws into) stays at render_width × render_height; the GL framebuffer
+ * the 3D pass writes to is super_factor × that on each axis, then nearest-
+ * neighbour downsampled into the pixmap on FlushBuffer so the existing 2D
+ * compositing keeps working unchanged. The super-res framebuffer is also
+ * kept around as a GPU texture for the high-res present path. */
+static int super_factor = 1;
+static int super_width, super_height;
 static int vp_x, vp_y, vp_width, vp_height;
 
 static br_pixelmap *last_colour_buffer, *last_depth_buffer;
@@ -239,10 +247,22 @@ static void SetupFullScreenRectGeometry(void) {
     glBindVertexArray(0);
 }
 
+void GLRenderer_SetSuperFactor(int factor) {
+    if (factor < 1) {
+        factor = 1;
+    }
+    super_factor = factor;
+}
+
 void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_height) {
     opengl_profile = profile;
     render_width = pRender_width;
     render_height = pRender_height;
+    if (super_factor < 1) {
+        super_factor = 1;
+    }
+    super_width = render_width * super_factor;
+    super_height = render_height * super_factor;
 
     LOG_INFO("OpenGL vendor string: %s", glGetString(GL_VENDOR));
     LOG_INFO("OpenGL renderer string: %s", glGetString(GL_RENDERER));
@@ -290,7 +310,7 @@ void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_hei
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glBindTexture(GL_TEXTURE_2D, framebuffer_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, render_width, render_height, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8UI, super_width, super_height, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, framebuffer_texture, 0);
@@ -300,7 +320,7 @@ void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_hei
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glBindTexture(GL_TEXTURE_2D, depth_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, render_width, render_height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, super_width, super_height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture, 0);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
@@ -308,8 +328,8 @@ void GLRenderer_Init(tOpenGL_profile profile, int pRender_width, int pRender_hei
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    screen_buffer_flip_pixels = malloc(sizeof(uint8_t) * render_width * render_height);
-    depth_buffer_flip_pixels = malloc(sizeof(uint16_t) * render_width * render_height);
+    screen_buffer_flip_pixels = malloc(sizeof(uint8_t) * super_width * super_height);
+    depth_buffer_flip_pixels = malloc(sizeof(uint16_t) * super_width * super_height);
 
     CHECK_GL_ERROR("initializeOpenGLContext");
 }
@@ -376,9 +396,14 @@ extern br_v1db_state v1db;
 void GLRenderer_BeginScene(br_actor* camera, br_pixelmap* colour_buffer, br_pixelmap* depth_buffer) {
     last_colour_buffer = colour_buffer;
     last_depth_buffer = depth_buffer;
-    glViewport(colour_buffer->base_x, render_height - colour_buffer->height - colour_buffer->base_y, colour_buffer->width, colour_buffer->height);
+    /* The 3D pass renders into a super-res framebuffer, so scale viewport
+     * dimensions and y-flip math by super_factor. */
+    glViewport(colour_buffer->base_x * super_factor,
+               (render_height - colour_buffer->height - colour_buffer->base_y) * super_factor,
+               colour_buffer->width * super_factor,
+               colour_buffer->height * super_factor);
     glUseProgram(shader_program_3d);
-    glUniform1ui(uniforms_3d.viewport_height, render_height);
+    glUniform1ui(uniforms_3d.viewport_height, super_height);
 
     br_camera* cam = camera->type_data;
     current_material = NULL;
@@ -733,10 +758,11 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
         return;
     }
 
-    // pull framebuffer into cpu memory to emulate BRender behavior
+    // pull super-res framebuffer into cpu memory; we downsample below for the
+    // pixmap and keep the GPU texture itself for the high-res present path.
     if (opengl_profile == eOpenGL_profile_es) {
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
-        glReadPixels(0, 0, render_width, render_height, GL_RED_INTEGER, GL_UNSIGNED_BYTE, screen_buffer_flip_pixels);
+        glReadPixels(0, 0, super_width, super_height, GL_RED_INTEGER, GL_UNSIGNED_BYTE, screen_buffer_flip_pixels);
     } else {
         glBindTexture(GL_TEXTURE_2D, framebuffer_texture);
         glGetTexImage(GL_TEXTURE_2D, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, screen_buffer_flip_pixels);
@@ -744,14 +770,16 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
 
     CHECK_GL_ERROR("GLRenderer_FlushBuffer3");
 
-    // flip texture to match the expected orientation
+    // flip Y and nearest-neighbour downsample super → pixmap.
     int dest_y = render_height;
 
     uint8_t new_pixel;
     for (int y = 0; y < render_height; y++) {
         dest_y--;
+        int src_y = y * super_factor;
         for (int x = 0; x < render_width; x++) {
-            new_pixel = screen_buffer_flip_pixels[y * render_width + x];
+            int src_x = x * super_factor;
+            new_pixel = screen_buffer_flip_pixels[src_y * super_width + src_x];
             if (new_pixel != 0) {
                 pm_pixels[dest_y * render_width + x] = new_pixel;
             }
@@ -762,14 +790,15 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
 
     if (flush_type == eFlush_all) {
 
-        // pull depthbuffer into cpu memory to emulate BRender behavior
+        // pull depth buffer into cpu memory to emulate BRender behavior. Read
+        // at super-res and nearest-neighbour downsample like the colour pass.
 #ifdef __ANDROID__
         // GLES does not allow glReadPixels with GL_DEPTH_COMPONENT.
         // Skipping disables depth-dependent CPU effects (shadows, etc.) but keeps the renderer alive.
-        memset(depth_buffer_flip_pixels, 0xff, render_width * render_height * sizeof(uint16_t));
+        memset(depth_buffer_flip_pixels, 0xff, super_width * super_height * sizeof(uint16_t));
 #else
         if (opengl_profile == eOpenGL_profile_es) {
-            glReadPixels(0, 0, render_width, render_height, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, depth_buffer_flip_pixels);
+            glReadPixels(0, 0, super_width, super_height, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, depth_buffer_flip_pixels);
         } else {
             glBindTexture(GL_TEXTURE_2D, depth_texture);
             glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, depth_buffer_flip_pixels);
@@ -781,8 +810,10 @@ void GLRenderer_FlushBuffer(tRenderer_flush_type flush_type) {
 
         for (int y = 0; y < last_colour_buffer->height; y++) {
             dest_y--;
+            int src_super_y = src_y * super_factor;
             for (int x = 0; x < last_colour_buffer->width; x++) {
-                uint16_t new_depth = depth_buffer_flip_pixels[src_y * render_width + last_colour_buffer->base_x + x];
+                int src_super_x = (last_colour_buffer->base_x + x) * super_factor;
+                uint16_t new_depth = depth_buffer_flip_pixels[src_super_y * super_width + src_super_x];
                 depth_pixels[dest_y * render_width + x] = new_depth;
             }
             src_y++;
