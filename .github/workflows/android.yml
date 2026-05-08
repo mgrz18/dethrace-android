@@ -47,6 +47,19 @@ jobs:
       - name: Fetch SDL2 source
         run: ./android/scripts/setup-sdl.sh
 
+      # The repo's VERSION file is gitignored (developers regenerate it locally),
+      # so on CI we synthesize one from the git ref. Without this, CMake falls
+      # through to the GetGitRevisionDescription path, which the Android build
+      # does not have on its module path.
+      - name: Write VERSION file
+        run: |
+          if [ -n "${GITHUB_REF_NAME:-}" ]; then
+            printf '%s\n' "${GITHUB_REF_NAME}-${GITHUB_SHA::8}" > VERSION
+          else
+            printf '%s\n' "ci-${GITHUB_SHA::8}" > VERSION
+          fi
+          cat VERSION
+
       - name: Make Gradle wrapper executable
         working-directory: android
         run: chmod +x ./gradlew
